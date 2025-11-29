@@ -295,7 +295,12 @@ class BusDetailView(APIView):
                     # Calculate ETA (simple estimation based on distance and average speed)
                     distance = next_stop['distance_from_prev_meters']
                     avg_speed = float(bus.get('speed', 0)) or 30  # Default 30 km/h if stopped
-                    eta_minutes = (distance / 1000) / avg_speed * 60 if avg_speed > 0 else None
+                    
+                    # Only calculate ETA if distance is available
+                    if distance is not None and avg_speed > 0:
+                        eta_minutes = (distance / 1000) / avg_speed * 60
+                    else:
+                        eta_minutes = None
                     
                     response['next_stop'] = {
                         'sequence': next_stop['sequence'],
@@ -445,8 +450,9 @@ class BusLocationView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        speed = request.data.get('speed', 0)
-        heading = request.data.get('heading', 0)
+        # Get and clamp speed/heading to valid DECIMAL(5,2) range (max 999.99)
+        speed = min(max(float(request.data.get('speed', 0) or 0), 0), 999.99)
+        heading = min(max(float(request.data.get('heading', 0) or 0), 0), 360)
         
         # Calculate current_stop_sequence based on proximity to stops
         current_stop_sequence = None
@@ -484,12 +490,20 @@ class BusLocationView(APIView):
                 else:
                     current_stop_sequence = nearest_sequence
         
-        # Insert location record
-        location_id = execute_insert(
+        # Upsert location record (update if exists, insert if not)
+        # This keeps only the latest location per bus
+        execute_update(
             """
             INSERT INTO bus_locations 
-            (bus_id, latitude, longitude, speed, heading, current_stop_sequence)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            (bus_id, latitude, longitude, speed, heading, current_stop_sequence, recorded_at)
+            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE
+                latitude = VALUES(latitude),
+                longitude = VALUES(longitude),
+                speed = VALUES(speed),
+                heading = VALUES(heading),
+                current_stop_sequence = VALUES(current_stop_sequence),
+                recorded_at = CURRENT_TIMESTAMP
             """,
             [bus_id, latitude, longitude, speed, heading, current_stop_sequence]
         )
@@ -500,14 +514,14 @@ class BusLocationView(APIView):
             [bus_id]
         )
         
-        # Get the created location record
+        # Get the location record
         location = execute_query_one(
             """
             SELECT location_id, bus_id, latitude, longitude, speed, 
                    heading, current_stop_sequence, recorded_at
-            FROM bus_locations WHERE location_id = %s
+            FROM bus_locations WHERE bus_id = %s
             """,
-            [location_id]
+            [bus_id]
         )
         
         return Response({
@@ -524,17 +538,10 @@ class BusLocationView(APIView):
 
 class BusStartTripView(APIView):
     """
-    POST /api/buses/{id}/start-trip/ - Start a new trip for a bus
+    POST /api/buses/{id}/start-trip/ - Set bus status to active
     """
     
     def post(self, request, bus_id):
-        # Admin only
-        if not is_admin(request.user):
-            return Response(
-                {'error': 'Only admins can start trips.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         # Check if bus exists
         bus = execute_query_one(
             "SELECT bus_id, route_id, status FROM buses WHERE bus_id = %s",
@@ -566,48 +573,7 @@ class BusStartTripView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        direction = request.data.get('direction', 'outbound')
-        if direction not in ['outbound', 'inbound']:
-            return Response(
-                {'error': 'direction must be outbound or inbound.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Get route stops to determine start position
-        stops = execute_query(
-            """
-            SELECT rs.sequence_number, rs.stop_id, s.latitude, s.longitude
-            FROM route_stops rs
-            JOIN stops s ON rs.stop_id = s.stop_id
-            WHERE rs.route_id = %s
-            ORDER BY rs.sequence_number
-            """,
-            [route_id]
-        )
-        
-        if not stops:
-            return Response(
-                {'error': 'Route has no stops.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Determine start stop
-        if direction == 'outbound':
-            start_sequence = request.data.get('start_stop_sequence', 1)
-        else:
-            start_sequence = request.data.get('start_stop_sequence', stops[-1]['sequence_number'])
-        
-        start_stop = None
-        for stop in stops:
-            if stop['sequence_number'] == start_sequence:
-                start_stop = stop
-                break
-        
-        if not start_stop:
-            start_stop = stops[0] if direction == 'outbound' else stops[-1]
-            start_sequence = start_stop['sequence_number']
-        
-        # Update bus status and route
+        # Update bus status to active and set route
         execute_update(
             """
             UPDATE buses 
@@ -617,62 +583,20 @@ class BusStartTripView(APIView):
             [route_id, bus_id]
         )
         
-        # Create trip record
-        trip_id = execute_insert(
-            """
-            INSERT INTO bus_trips (bus_id, route_id, direction, start_time, start_stop_id, status)
-            VALUES (%s, %s, %s, NOW(), %s, 'in-progress')
-            """,
-            [bus_id, route_id, direction, start_stop['stop_id']]
-        )
-        
-        # Initialize location at start stop
-        execute_insert(
-            """
-            INSERT INTO bus_locations 
-            (bus_id, latitude, longitude, speed, heading, current_stop_sequence)
-            VALUES (%s, %s, %s, 0, 0, %s)
-            """,
-            [bus_id, start_stop['latitude'], start_stop['longitude'], start_sequence]
-        )
-        
-        # Get trip info
-        trip = execute_query_one(
-            """
-            SELECT trip_id, route_id, direction, start_time, status
-            FROM bus_trips WHERE trip_id = %s
-            """,
-            [trip_id]
-        )
-        
         return Response({
             'bus_id': bus_id,
             'status': 'active',
-            'trip': {
-                'id': trip['trip_id'],
-                'route_id': trip['route_id'],
-                'direction': trip['direction'],
-                'start_time': trip['start_time'].isoformat(),
-                'current_stop_sequence': start_sequence,
-                'status': trip['status']
-            },
-            'message': 'Trip started successfully'
+            'route_id': route_id,
+            'message': 'Bus is now active'
         }, status=status.HTTP_200_OK)
 
 
 class BusEndTripView(APIView):
     """
-    POST /api/buses/{id}/end-trip/ - End the current trip for a bus
+    POST /api/buses/{id}/end-trip/ - Set bus status to inactive
     """
     
     def post(self, request, bus_id):
-        # Admin only
-        if not is_admin(request.user):
-            return Response(
-                {'error': 'Only admins can end trips.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         # Check if bus exists
         bus = execute_query_one(
             "SELECT bus_id, status FROM buses WHERE bus_id = %s",
@@ -683,17 +607,6 @@ class BusEndTripView(APIView):
                 {'error': 'Bus not found.'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Get current trip
-        trip = execute_query_one(
-            """
-            SELECT trip_id, route_id, direction, start_time
-            FROM bus_trips 
-            WHERE bus_id = %s AND status = 'in-progress'
-            ORDER BY trip_id DESC LIMIT 1
-            """,
-            [bus_id]
-        )
         
         new_status = request.data.get('status', 'inactive')
         if new_status not in ['inactive', 'maintenance']:
@@ -709,46 +622,21 @@ class BusEndTripView(APIView):
             [new_status, bus_id]
         )
         
-        response = {
+        # Reset speed and heading to 0 in bus_locations
+        execute_update(
+            """
+            UPDATE bus_locations 
+            SET speed = 0, heading = 0
+            WHERE bus_id = %s
+            """,
+            [bus_id]
+        )
+        
+        return Response({
             'bus_id': bus_id,
             'status': new_status,
-            'message': 'Trip ended successfully'
-        }
-        
-        if trip:
-            # Complete the trip
-            execute_update(
-                """
-                UPDATE bus_trips 
-                SET end_time = NOW(), status = 'completed'
-                WHERE trip_id = %s
-                """,
-                [trip['trip_id']]
-            )
-            
-            # Get updated trip info
-            completed_trip = execute_query_one(
-                """
-                SELECT trip_id, route_id, direction, start_time, end_time, status,
-                       TIMESTAMPDIFF(MINUTE, start_time, end_time) as duration_minutes
-                FROM bus_trips WHERE trip_id = %s
-                """,
-                [trip['trip_id']]
-            )
-            
-            response['trip'] = {
-                'id': completed_trip['trip_id'],
-                'route_id': completed_trip['route_id'],
-                'direction': completed_trip['direction'],
-                'start_time': completed_trip['start_time'].isoformat(),
-                'end_time': completed_trip['end_time'].isoformat(),
-                'status': completed_trip['status'],
-                'total_duration_minutes': completed_trip['duration_minutes']
-            }
-        else:
-            response['trip'] = None
-        
-        return Response(response, status=status.HTTP_200_OK)
+            'message': 'Bus is now ' + new_status
+        }, status=status.HTTP_200_OK)
 
 
 class ActiveBusesView(APIView):

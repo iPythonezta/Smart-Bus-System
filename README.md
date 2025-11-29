@@ -181,6 +181,356 @@ GET /api/dashboard/stats/
 
 ---
 
+### Stops
+
+#### List All Stops
+```
+GET /api/stops/
+```
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| search | Filter stops by name (partial match) |
+
+**Example:** `GET /api/stops/?search=Blue`
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "name": "Blue Area",
+    "description": "Main commercial area",
+    "latitude": 33.7077,
+    "longitude": 73.0469,
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-15T10:30:00"
+  }
+]
+```
+
+---
+
+#### Get Stop Details
+```
+GET /api/stops/{id}/
+```
+
+**Response:** `200 OK`
+```json
+{
+  "id": 1,
+  "name": "Blue Area",
+  "description": "Main commercial area",
+  "latitude": 33.7077,
+  "longitude": 73.0469,
+  "created_at": "2024-01-15T10:30:00",
+  "updated_at": "2024-01-15T10:30:00"
+}
+```
+
+**Error:** `404 Not Found`
+```json
+{
+  "detail": "Stop not found"
+}
+```
+
+---
+
+#### Create Stop (Admin Only)
+```
+POST /api/stops/
+```
+
+**Request:**
+```json
+{
+  "name": "Faizabad",
+  "description": "Major intersection",
+  "latitude": 33.6507,
+  "longitude": 73.0681
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | Yes | Stop name (min 2 chars) |
+| description | string | No | Stop description |
+| latitude | number | Yes | Latitude (-90 to 90) |
+| longitude | number | Yes | Longitude (-180 to 180) |
+
+**Response:** `201 Created`
+```json
+{
+  "id": 2,
+  "name": "Faizabad",
+  "description": "Major intersection",
+  "latitude": 33.6507,
+  "longitude": 73.0681,
+  "created_at": "2024-01-15T11:00:00",
+  "updated_at": "2024-01-15T11:00:00"
+}
+```
+
+---
+
+#### Update Stop (Admin Only)
+```
+PATCH /api/stops/{id}/
+```
+
+**Request:** (all fields optional)
+```json
+{
+  "name": "Faizabad Interchange",
+  "description": "Updated description",
+  "latitude": 33.6510,
+  "longitude": 73.0685
+}
+```
+
+**Response:** `200 OK` - Returns updated stop object
+
+---
+
+#### Delete Stop (Admin Only)
+```
+DELETE /api/stops/{id}/
+```
+
+**Response:** `204 No Content`
+
+**Error:** `400 Bad Request` (if stop is assigned to routes)
+```json
+{
+  "detail": "Cannot delete stop that is assigned to routes"
+}
+```
+
+---
+
+### Routes
+
+#### List All Routes
+```
+GET /api/routes/
+```
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| search | Filter routes by name or code |
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "name": "Blue Line",
+    "code": "BL",
+    "description": "Blue Area to Faizabad",
+    "color": "#3b82f6",
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-15T10:30:00",
+    "route_stops": [
+      {
+        "id": 1,
+        "route_id": 1,
+        "stop_id": 1,
+        "sequence_number": 1,
+        "distance_from_prev": null,
+        "stop": {
+          "id": 1,
+          "name": "Blue Area",
+          "description": "Main commercial area",
+          "latitude": 33.7077,
+          "longitude": 73.0469,
+          "created_at": "2024-01-15T10:30:00",
+          "updated_at": "2024-01-15T10:30:00"
+        }
+      }
+    ]
+  }
+]
+```
+
+---
+
+#### Get Route Details
+```
+GET /api/routes/{id}/
+```
+
+**Response:** `200 OK` - Same format as list item with all stops
+
+**Error:** `404 Not Found`
+```json
+{
+  "detail": "Route not found"
+}
+```
+
+---
+
+#### Create Route (Admin Only)
+```
+POST /api/routes/
+```
+
+**Request:**
+```json
+{
+  "name": "Green Line",
+  "code": "GL",
+  "description": "Secretariat to Melody",
+  "color": "#10b981"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | Yes | Route name (min 2 chars) |
+| code | string | Yes | Route code (2-10 chars, unique) |
+| description | string | No | Route description |
+| color | string | No | Hex color (default: #3B82F6) |
+
+**Response:** `201 Created`
+```json
+{
+  "id": 2,
+  "name": "Green Line",
+  "code": "GL",
+  "description": "Secretariat to Melody",
+  "color": "#10b981",
+  "created_at": "2024-01-15T11:00:00",
+  "updated_at": "2024-01-15T11:00:00",
+  "route_stops": []
+}
+```
+
+---
+
+#### Update Route (Admin Only)
+```
+PATCH /api/routes/{id}/
+```
+
+**Request:** (all fields optional)
+```json
+{
+  "name": "Green Express Line",
+  "code": "GEL",
+  "description": "Express service",
+  "color": "#059669"
+}
+```
+
+**Response:** `200 OK` - Returns updated route with stops
+
+---
+
+#### Delete Route (Admin Only)
+```
+DELETE /api/routes/{id}/
+```
+
+**Response:** `204 No Content`
+
+**Error:** `400 Bad Request` (if route has buses assigned)
+```json
+{
+  "detail": "Cannot delete route that has buses assigned"
+}
+```
+
+---
+
+### Route Stops
+
+#### Add Stop to Route (Admin Only)
+```
+POST /api/routes/{route_id}/stops/
+```
+
+**Request:**
+```json
+{
+  "stop_id": 3,
+  "sequence_number": 2
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| stop_id | integer | Yes | ID of the stop to add |
+| sequence_number | integer | Yes | Position in route (1-based) |
+
+**Response:** `201 Created`
+```json
+{
+  "id": 5,
+  "route_id": 1,
+  "stop_id": 3,
+  "sequence_number": 2,
+  "distance_from_prev": null,
+  "stop": {
+    "id": 3,
+    "name": "Aabpara Market",
+    "description": null,
+    "latitude": 33.7150,
+    "longitude": 73.0550,
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-15T10:30:00"
+  }
+}
+```
+
+*Note: Existing stops at or after the sequence number are shifted down automatically.*
+
+---
+
+#### Remove Stop from Route (Admin Only)
+```
+DELETE /api/routes/{route_id}/stops/{route_stop_id}/
+```
+
+**Response:** `204 No Content`
+
+*Note: Remaining stops are re-sequenced automatically.*
+
+---
+
+#### Reorder Route Stops (Admin Only)
+```
+PUT /api/routes/{route_id}/stops/reorder/
+```
+
+**Request:**
+```json
+{
+  "route_stop_ids": [3, 1, 5, 2, 4]
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "message": "Route stops reordered successfully",
+  "route_stops": [...]
+}
+```
+
+**Error:** `400 Bad Request`
+```json
+{
+  "detail": "Invalid route_stop_ids - must include all stops in route"
+}
+```
+
+---
+
 ### Buses
 
 #### List All Buses
@@ -400,7 +750,7 @@ Used by GPS tracking devices to update bus position.
 
 ---
 
-#### Start Trip (Admin Only)
+#### Start Trip
 ```
 POST /api/buses/{id}/start-trip/
 ```
@@ -439,7 +789,7 @@ POST /api/buses/{id}/start-trip/
 
 ---
 
-#### End Trip (Admin Only)
+#### End Trip
 ```
 POST /api/buses/{id}/end-trip/
 ```
@@ -530,14 +880,27 @@ Optimized endpoint for displaying buses on a map.
 | `/api/me/` | GET | ✅ | ❌ | Get current user |
 | `/api/users/` | GET | ✅ | ✅ | List all users |
 | `/api/dashboard/stats/` | GET | ✅ | ❌ | Dashboard statistics |
+| `/api/stops/` | GET | ✅ | ❌ | List all stops |
+| `/api/stops/` | POST | ✅ | ✅ | Create stop |
+| `/api/stops/{id}/` | GET | ✅ | ❌ | Get stop details |
+| `/api/stops/{id}/` | PATCH | ✅ | ✅ | Update stop |
+| `/api/stops/{id}/` | DELETE | ✅ | ✅ | Delete stop |
+| `/api/routes/` | GET | ✅ | ❌ | List all routes |
+| `/api/routes/` | POST | ✅ | ✅ | Create route |
+| `/api/routes/{id}/` | GET | ✅ | ❌ | Get route details |
+| `/api/routes/{id}/` | PATCH | ✅ | ✅ | Update route |
+| `/api/routes/{id}/` | DELETE | ✅ | ✅ | Delete route |
+| `/api/routes/{id}/stops/` | POST | ✅ | ✅ | Add stop to route |
+| `/api/routes/{id}/stops/{rs_id}/` | DELETE | ✅ | ✅ | Remove stop from route |
+| `/api/routes/{id}/stops/reorder/` | PUT | ✅ | ✅ | Reorder route stops |
 | `/api/buses/` | GET | ✅ | ❌ | List all buses |
 | `/api/buses/` | POST | ✅ | ✅ | Create bus |
 | `/api/buses/{id}/` | GET | ✅ | ❌ | Get bus details |
 | `/api/buses/{id}/` | PATCH | ✅ | ✅ | Update bus |
 | `/api/buses/{id}/` | DELETE | ✅ | ✅ | Delete bus |
 | `/api/buses/{id}/location/` | POST | ✅ | ❌ | Update GPS location |
-| `/api/buses/{id}/start-trip/` | POST | ✅ | ✅ | Start trip |
-| `/api/buses/{id}/end-trip/` | POST | ✅ | ✅ | End trip |
+| `/api/buses/{id}/start-trip/` | POST | ✅ | ❌ | Start trip |
+| `/api/buses/{id}/end-trip/` | POST | ✅ | ❌ | End trip |
 | `/api/buses/active/` | GET | ✅ | ❌ | Active buses for map |
 
 ---

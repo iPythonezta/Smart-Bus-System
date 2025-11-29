@@ -5,6 +5,11 @@ from .views_buses import (
     BusListView, BusDetailView, BusLocationView,
     BusStartTripView, BusEndTripView, ActiveBusesView
 )
+from .views_stops import StopListView, StopDetailView
+from .views_routes import (
+    RouteListView, RouteDetailView,
+    RouteStopsView, RouteStopDetailView, RouteStopsReorderView
+)
 
 urlpatterns = [
     # Auth endpoints
@@ -23,4 +28,15 @@ urlpatterns = [
     path('buses/<int:bus_id>/location/', BusLocationView.as_view(), name='bus_location'),
     path('buses/<int:bus_id>/start-trip/', BusStartTripView.as_view(), name='bus_start_trip'),
     path('buses/<int:bus_id>/end-trip/', BusEndTripView.as_view(), name='bus_end_trip'),
+    
+    # Stop endpoints
+    path('stops/', StopListView.as_view(), name='stop_list'),
+    path('stops/<int:stop_id>/', StopDetailView.as_view(), name='stop_detail'),
+    
+    # Route endpoints
+    path('routes/', RouteListView.as_view(), name='route_list'),
+    path('routes/<int:route_id>/', RouteDetailView.as_view(), name='route_detail'),
+    path('routes/<int:route_id>/stops/', RouteStopsView.as_view(), name='route_stops'),
+    path('routes/<int:route_id>/stops/reorder/', RouteStopsReorderView.as_view(), name='route_stops_reorder'),
+    path('routes/<int:route_id>/stops/<int:route_stop_id>/', RouteStopDetailView.as_view(), name='route_stop_detail'),
 ]

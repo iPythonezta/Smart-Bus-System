@@ -84,6 +84,7 @@ class Command(BaseCommand):
 
             # =====================================================
             # BUS_LOCATIONS TABLE
+            # Stores only the latest location per bus (one row per bus)
             # =====================================================
             """
             CREATE TABLE IF NOT EXISTS bus_locations (
@@ -94,11 +95,11 @@ class Command(BaseCommand):
                 speed DECIMAL(5, 2) DEFAULT 0,
                 heading DECIMAL(5, 2) DEFAULT 0,
                 current_stop_sequence INT,
-                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 CONSTRAINT pk_bus_locations PRIMARY KEY (location_id),
                 CONSTRAINT fk_bus_locations_bus_id FOREIGN KEY (bus_id)
                     REFERENCES buses (bus_id) ON DELETE CASCADE,
-                INDEX idx_bus_locations_bus_time (bus_id, recorded_at DESC)
+                UNIQUE KEY uk_bus_locations_bus_id (bus_id)
             )
             """,
 
