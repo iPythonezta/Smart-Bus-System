@@ -10,6 +10,9 @@ from .views_routes import (
     RouteListView, RouteDetailView,
     RouteStopsView, RouteStopDetailView, RouteStopsReorderView
 )
+from .views_advertisements import AdvertisementListView, AdvertisementDetailView
+from .views_ad_schedules import AdScheduleListView, AdScheduleDetailView
+from .views_announcements import AnnouncementListView, AnnouncementDetailView
 
 urlpatterns = [
     # Auth endpoints
@@ -39,4 +42,16 @@ urlpatterns = [
     path('routes/<int:route_id>/stops/', RouteStopsView.as_view(), name='route_stops'),
     path('routes/<int:route_id>/stops/reorder/', RouteStopsReorderView.as_view(), name='route_stops_reorder'),
     path('routes/<int:route_id>/stops/<int:route_stop_id>/', RouteStopDetailView.as_view(), name='route_stop_detail'),
+    
+    # Advertisement endpoints
+    path('advertisements/', AdvertisementListView.as_view(), name='advertisement_list'),
+    path('advertisements/<int:ad_id>/', AdvertisementDetailView.as_view(), name='advertisement_detail'),
+    
+    # Ad Schedule endpoints
+    path('ad-schedules/', AdScheduleListView.as_view(), name='ad_schedule_list'),
+    path('ad-schedules/<int:schedule_id>/', AdScheduleDetailView.as_view(), name='ad_schedule_detail'),
+    
+    # Announcement endpoints
+    path('announcements/', AnnouncementListView.as_view(), name='announcement_list'),
+    path('announcements/<int:announcement_id>/', AnnouncementDetailView.as_view(), name='announcement_detail'),
 ]

@@ -853,6 +853,358 @@ Optimized endpoint for displaying buses on a map.
 
 ---
 
+### Advertisements
+
+#### List All Advertisements
+```
+GET /api/advertisements/
+```
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| search | Filter by title or advertiser name |
+| media_type | Filter by type (`image` or `youtube`) |
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "title": "Summer Sale 2024",
+    "content_url": "https://example.com/ad.jpg",
+    "media_type": "image",
+    "duration_seconds": 10,
+    "advertiser_name": "ABC Store",
+    "advertiser_contact": "+92-300-1234567",
+    "metadata": {
+      "campaign": "summer-2024"
+    },
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-15T10:30:00"
+  }
+]
+```
+
+---
+
+#### Get Advertisement Details
+```
+GET /api/advertisements/{id}/
+```
+
+**Response:** `200 OK` - Same format as list item
+
+**Error:** `404 Not Found`
+```json
+{
+  "detail": "Advertisement not found"
+}
+```
+
+---
+
+#### Create Advertisement
+```
+POST /api/advertisements/
+```
+
+**Request:**
+```json
+{
+  "title": "Summer Sale 2024",
+  "content_url": "https://example.com/ad.jpg",
+  "media_type": "image",
+  "duration_seconds": 10,
+  "advertiser_name": "ABC Store",
+  "advertiser_contact": "+92-300-1234567",
+  "metadata": {
+    "campaign": "summer-2024"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| title | string | Yes | Ad title (min 2 chars) |
+| content_url | string | Yes | URL to image or YouTube video |
+| media_type | string | Yes | `image` or `youtube` |
+| duration_seconds | integer | Yes | Display duration (min 1) |
+| advertiser_name | string | Yes | Advertiser name |
+| advertiser_contact | string | No | Contact info |
+| metadata | object | No | Additional data |
+
+**Response:** `201 Created`
+
+---
+
+#### Update Advertisement
+```
+PATCH /api/advertisements/{id}/
+```
+
+**Request:** (all fields optional)
+```json
+{
+  "title": "Winter Sale 2024",
+  "duration_seconds": 15
+}
+```
+
+**Response:** `200 OK` - Returns updated advertisement
+
+---
+
+#### Delete Advertisement
+```
+DELETE /api/advertisements/{id}/
+```
+
+**Response:** `204 No Content`
+
+*Note: Deleting an advertisement also deletes all associated schedules.*
+
+---
+
+### Ad Schedules
+
+#### List All Ad Schedules
+```
+GET /api/ad-schedules/
+```
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| ad_id | Filter by advertisement ID |
+| display_id | Filter by display ID |
+| active | Filter active schedules (`true`) |
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "ad_id": 1,
+    "display_id": 1,
+    "display_name": "Blue Area Display",
+    "start_time": "2024-01-15T08:00:00",
+    "end_time": "2024-01-31T20:00:00",
+    "priority": 1,
+    "ad": {
+      "id": 1,
+      "title": "Summer Sale 2024",
+      "content_url": "https://example.com/ad.jpg",
+      "media_type": "image",
+      "duration_seconds": 10,
+      "advertiser_name": "ABC Store",
+      "advertiser_contact": "+92-300-1234567",
+      "metadata": null,
+      "created_at": "2024-01-15T10:30:00",
+      "updated_at": "2024-01-15T10:30:00"
+    },
+    "created_at": "2024-01-15T11:00:00"
+  }
+]
+```
+
+---
+
+#### Get Ad Schedule Details
+```
+GET /api/ad-schedules/{id}/
+```
+
+**Response:** `200 OK` - Same format as list item
+
+**Error:** `404 Not Found`
+```json
+{
+  "detail": "Ad schedule not found"
+}
+```
+
+---
+
+#### Create Ad Schedule
+```
+POST /api/ad-schedules/
+```
+
+**Request:**
+```json
+{
+  "ad_id": 1,
+  "display_ids": [1, 2, 3],
+  "start_time": "2024-01-15T08:00:00Z",
+  "end_time": "2024-01-31T20:00:00Z",
+  "priority": 1
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| ad_id | integer | Yes | Advertisement ID |
+| display_ids | array | Yes | Array of display IDs |
+| start_time | datetime | Yes | Schedule start |
+| end_time | datetime | Yes | Schedule end |
+| priority | integer | Yes | Display priority (higher = more priority) |
+
+*Note: Creates one schedule per display in the array.*
+
+**Response:** `201 Created` - Returns array of created schedules
+
+---
+
+#### Update Ad Schedule
+```
+PATCH /api/ad-schedules/{id}/
+```
+
+**Request:** (all fields optional)
+```json
+{
+  "ad_id": 2,
+  "display_id": 2,
+  "start_time": "2024-02-01T08:00:00Z",
+  "end_time": "2024-02-28T20:00:00Z",
+  "priority": 2
+}
+```
+
+**Response:** `200 OK` - Returns updated schedule
+
+---
+
+#### Delete Ad Schedule
+```
+DELETE /api/ad-schedules/{id}/
+```
+
+**Response:** `204 No Content`
+
+---
+
+### Announcements
+
+#### List All Announcements
+```
+GET /api/announcements/
+```
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| search | Filter by title or message |
+| severity | Filter by severity (`info`, `warning`, `emergency`) |
+| active | Filter active announcements (`true`) |
+| route_id | Filter by route ID |
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "title": "Service Disruption",
+    "message": "Blue Line delayed by 15 mins",
+    "message_ur": "بلیو لائن 15 منٹ تاخیر سے",
+    "severity": "warning",
+    "start_time": "2024-01-15T08:00:00",
+    "end_time": "2024-01-15T12:00:00",
+    "route_ids": [1, 2],
+    "routes": [
+      {
+        "id": 1,
+        "name": "Blue Line",
+        "code": "BL",
+        "color": "#3b82f6"
+      }
+    ],
+    "created_by": "admin@example.com",
+    "created_at": "2024-01-15T07:30:00",
+    "updated_at": "2024-01-15T07:30:00"
+  }
+]
+```
+
+---
+
+#### Get Announcement Details
+```
+GET /api/announcements/{id}/
+```
+
+**Response:** `200 OK` - Same format as list item
+
+**Error:** `404 Not Found`
+```json
+{
+  "detail": "Announcement not found"
+}
+```
+
+---
+
+#### Create Announcement
+```
+POST /api/announcements/
+```
+
+**Request:**
+```json
+{
+  "title": "Service Disruption",
+  "message": "Blue Line delayed by 15 mins",
+  "message_ur": "بلیو لائن 15 منٹ تاخیر سے",
+  "severity": "warning",
+  "start_time": "2024-01-15T08:00:00Z",
+  "end_time": "2024-01-15T12:00:00Z",
+  "route_ids": [1, 2]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| title | string | Yes | Announcement title (min 2 chars) |
+| message | string | Yes | English message |
+| message_ur | string | No | Urdu translation |
+| severity | string | Yes | `info`, `warning`, or `emergency` |
+| start_time | datetime | Yes | Start time |
+| end_time | datetime | Yes | End time |
+| route_ids | array | Yes | Route IDs (empty = all routes) |
+
+**Response:** `201 Created`
+
+---
+
+#### Update Announcement
+```
+PATCH /api/announcements/{id}/
+```
+
+**Request:** (all fields optional)
+```json
+{
+  "title": "Service Disruption - Update",
+  "message": "Blue Line resuming normal service.",
+  "severity": "info",
+  "route_ids": [1]
+}
+```
+
+**Response:** `200 OK` - Returns updated announcement
+
+---
+
+#### Delete Announcement
+```
+DELETE /api/announcements/{id}/
+```
+
+**Response:** `204 No Content`
+
+---
+
 ## Error Responses
 
 | Status Code | Description |
@@ -899,9 +1251,24 @@ Optimized endpoint for displaying buses on a map.
 | `/api/buses/{id}/` | PATCH | ✅ | ✅ | Update bus |
 | `/api/buses/{id}/` | DELETE | ✅ | ✅ | Delete bus |
 | `/api/buses/{id}/location/` | POST | ✅ | ❌ | Update GPS location |
-| `/api/buses/{id}/start-trip/` | POST | ✅ | ❌ | Start trip |
-| `/api/buses/{id}/end-trip/` | POST | ✅ | ❌ | End trip |
+| `/api/buses/{id}/start-trip/` | POST | ✅ | ❌ | Set bus active |
+| `/api/buses/{id}/end-trip/` | POST | ✅ | ❌ | Set bus inactive |
 | `/api/buses/active/` | GET | ✅ | ❌ | Active buses for map |
+| `/api/advertisements/` | GET | ✅ | ❌ | List all advertisements |
+| `/api/advertisements/` | POST | ✅ | ❌ | Create advertisement |
+| `/api/advertisements/{id}/` | GET | ✅ | ❌ | Get advertisement details |
+| `/api/advertisements/{id}/` | PATCH | ✅ | ❌ | Update advertisement |
+| `/api/advertisements/{id}/` | DELETE | ✅ | ❌ | Delete advertisement |
+| `/api/ad-schedules/` | GET | ✅ | ❌ | List all ad schedules |
+| `/api/ad-schedules/` | POST | ✅ | ❌ | Create ad schedule |
+| `/api/ad-schedules/{id}/` | GET | ✅ | ❌ | Get ad schedule details |
+| `/api/ad-schedules/{id}/` | PATCH | ✅ | ❌ | Update ad schedule |
+| `/api/ad-schedules/{id}/` | DELETE | ✅ | ❌ | Delete ad schedule |
+| `/api/announcements/` | GET | ✅ | ❌ | List all announcements |
+| `/api/announcements/` | POST | ✅ | ❌ | Create announcement |
+| `/api/announcements/{id}/` | GET | ✅ | ❌ | Get announcement details |
+| `/api/announcements/{id}/` | PATCH | ✅ | ❌ | Update announcement |
+| `/api/announcements/{id}/` | DELETE | ✅ | ❌ | Delete announcement |
 
 ---
 

@@ -6,6 +6,32 @@ using raw SQL instead of Django's ORM.
 
 from django.db import connection
 from contextlib import contextmanager
+from datetime import datetime
+
+
+def parse_datetime(dt_string):
+    """
+    Parse ISO 8601 datetime string to MySQL-compatible format.
+    Handles formats like: 2025-11-29T08:00:00.000Z, 2025-11-29T08:00:00Z, 2025-11-29T08:00:00
+    Returns string in format: YYYY-MM-DD HH:MM:SS
+    """
+    if not dt_string:
+        return None
+    
+    if isinstance(dt_string, datetime):
+        return dt_string.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Remove trailing Z and milliseconds
+    dt_string = str(dt_string).replace('Z', '').replace('z', '')
+    
+    # Handle milliseconds
+    if '.' in dt_string:
+        dt_string = dt_string.split('.')[0]
+    
+    # Replace T with space for MySQL
+    dt_string = dt_string.replace('T', ' ')
+    
+    return dt_string
 
 
 def dictfetchall(cursor):
