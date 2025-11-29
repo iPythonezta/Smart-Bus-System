@@ -116,7 +116,6 @@ class Command(BaseCommand):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 CONSTRAINT pk_display_units PRIMARY KEY (display_id),
-                CONSTRAINT uk_display_units_stop_id UNIQUE (stop_id),
                 CONSTRAINT fk_display_units_stop_id FOREIGN KEY (stop_id)
                     REFERENCES stops (stop_id) ON DELETE CASCADE
             )
