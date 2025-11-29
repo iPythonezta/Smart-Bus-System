@@ -1,31 +1,17 @@
 """
 Display Units (SMD) API views using raw SQL queries.
+Uses MapBox Directions API for accurate road-based ETA calculations.
 """
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .db import execute_query, execute_query_one, execute_insert, execute_update
+from .mapbox import get_eta_to_stop, fallback_eta
 from datetime import datetime
-from math import radians, sin, cos, sqrt, atan2
+import logging
 
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    """
-    Calculate distance between two coordinates using Haversine formula.
-    Returns distance in meters.
-    """
-    R = 6371000  # Earth's radius in meters
-    
-    lat1, lon1, lat2, lon2 = map(radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
-    
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    
-    return R * c
+logger = logging.getLogger(__name__)
 
 
 def format_display_response(display):
@@ -380,22 +366,38 @@ class DisplayContentView(APIView):
                 bus_lon = float(bus['longitude'])
                 bus_route_id = bus['route_id']
                 
-                # Only show buses that haven't passed this stop yet
+                # current_stop_sequence now uses MapBox for accurate positioning:
+                # - If bus is at stop N (within 150m road distance): sequence = N
+                # - If bus departed stop N and heading to N+1: sequence = N+1
+                # So: sequence > stop_sequence means bus has passed this stop
                 stop_sequence = route_sequences.get(bus_route_id, 0)
-                bus_sequence = bus['current_stop_sequence'] or 0
+                bus_sequence = int(bus['current_stop_sequence'] or 0)
                 
-                if bus_sequence >= stop_sequence:
-                    continue  # Bus has already passed or is at this stop
+                if bus_sequence > stop_sequence:
+                    continue  # Bus has already passed this stop
                 
-                # Calculate distance to stop
-                distance = calculate_distance(bus_lat, bus_lon, stop_lat, stop_lon)
+                # Get ETA using MapBox
+                eta_result = get_eta_to_stop(
+                    bus_location=(bus_lon, bus_lat),
+                    stop_location=(stop_lon, stop_lat)
+                )
                 
-                # Estimate ETA based on speed (or default 25 km/h)
-                speed_kmh = float(bus['speed']) if bus['speed'] and float(bus['speed']) > 0 else 25
-                eta_minutes = (distance / 1000) / speed_kmh * 60
+                # Fallback if MapBox fails
+                if not eta_result:
+                    logger.warning(f"MapBox API failed for bus {bus['bus_id']}, using fallback")
+                    speed_kmh = float(bus['speed']) if bus['speed'] and float(bus['speed']) > 0 else 25
+                    eta_result = fallback_eta(bus_lat, bus_lon, stop_lat, stop_lon, speed_kmh)
                 
-                # Determine arrival status
-                if eta_minutes <= 1:
+                distance_to_stop = eta_result['distance_meters']
+                eta_minutes = eta_result['eta_minutes']
+                
+                # Determine arrival status based on distance (150m threshold for "at stop")
+                AT_STOP_THRESHOLD = 150
+                if distance_to_stop <= AT_STOP_THRESHOLD:
+                    arrival_status = 'arrived'
+                    eta_minutes = 0
+                    distance_to_stop = 0
+                elif eta_minutes <= 1:
                     arrival_status = 'arriving'
                 elif eta_minutes <= 3:
                     arrival_status = 'approaching'
@@ -409,8 +411,8 @@ class DisplayContentView(APIView):
                     'route_name': bus['route_name'],
                     'route_code': bus['route_code'],
                     'route_color': bus['color'],
-                    'eta_minutes': round(eta_minutes, 1),
-                    'distance_meters': round(distance),
+                    'eta_minutes': eta_minutes,
+                    'distance_meters': distance_to_stop,
                     'arrival_status': arrival_status
                 })
         

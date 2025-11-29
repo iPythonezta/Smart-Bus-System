@@ -6,7 +6,11 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .db import execute_query, execute_query_one, execute_insert, execute_update
+from .mapbox import get_bus_position_on_route, haversine_distance
 from math import radians, sin, cos, sqrt, atan2
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def is_admin(user):
@@ -454,13 +458,14 @@ class BusLocationView(APIView):
         speed = min(max(float(request.data.get('speed', 0) or 0), 0), 999.99)
         heading = min(max(float(request.data.get('heading', 0) or 0), 0), 360)
         
-        # Calculate current_stop_sequence based on proximity to stops
+        # Calculate current_stop_sequence using MapBox for accurate road-based positioning
+        # This determines which stop the bus is at or heading toward
         current_stop_sequence = None
         
         if bus['route_id']:
             stops = execute_query(
                 """
-                SELECT rs.sequence_number, s.latitude, s.longitude
+                SELECT rs.sequence_number as sequence, rs.stop_id, s.latitude, s.longitude
                 FROM route_stops rs
                 JOIN stops s ON rs.stop_id = s.stop_id
                 WHERE rs.route_id = %s
@@ -470,25 +475,28 @@ class BusLocationView(APIView):
             )
             
             if stops:
-                # Find the nearest stop
-                min_distance = float('inf')
-                nearest_sequence = 1
+                # Convert to format expected by MapBox function
+                route_stops = [
+                    {
+                        'sequence': s['sequence'],
+                        'stop_id': s['stop_id'],
+                        'latitude': float(s['latitude']),
+                        'longitude': float(s['longitude'])
+                    }
+                    for s in stops
+                ]
                 
-                for stop in stops:
-                    distance = calculate_distance(
-                        latitude, longitude,
-                        stop['latitude'], stop['longitude']
-                    )
-                    if distance < min_distance:
-                        min_distance = distance
-                        nearest_sequence = stop['sequence_number']
+                # Use MapBox to determine bus position on route
+                position = get_bus_position_on_route(
+                    bus_location=(longitude, latitude),  # MapBox uses (lon, lat)
+                    route_stops=route_stops
+                )
                 
-                # If within 100m of a stop, we're at that stop
-                # Otherwise, we're between the nearest stop and the next
-                if min_distance <= 100:
-                    current_stop_sequence = nearest_sequence
-                else:
-                    current_stop_sequence = nearest_sequence
+                current_stop_sequence = position['current_stop_sequence']
+                logger.info(f"Bus {bus_id} position: at_stop={position['is_at_stop']}, "
+                           f"sequence={current_stop_sequence}, "
+                           f"next_stop={position['next_stop']}, "
+                           f"eta={position['eta_to_next']}min")
         
         # Upsert location record (update if exists, insert if not)
         # This keeps only the latest location per bus

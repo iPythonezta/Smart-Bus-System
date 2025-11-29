@@ -141,3 +141,5 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
+
+MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiYmlsYWxhbGliIiwiYSI6ImNtaWlmMHZiazAzNTkzZHNpYTVzeWpueWoifQ.fnHQ0i_G-NInzirfb9ZX6Q'

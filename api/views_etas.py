@@ -1,31 +1,17 @@
 """
 ETA (Estimated Time of Arrival) API views using raw SQL queries.
+Uses MapBox Directions API for accurate road-based ETA calculations.
 """
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .db import execute_query, execute_query_one
+from .mapbox import get_eta_to_stop, get_etas_to_multiple_stops, fallback_eta
 from datetime import datetime
-from math import radians, sin, cos, sqrt, atan2
+import logging
 
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    """
-    Calculate distance between two coordinates using Haversine formula.
-    Returns distance in meters.
-    """
-    R = 6371000  # Earth's radius in meters
-    
-    lat1, lon1, lat2, lon2 = map(radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
-    
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    
-    return R * c
+logger = logging.getLogger(__name__)
 
 
 class StopETAsView(APIView):
@@ -104,19 +90,45 @@ class StopETAsView(APIView):
             bus_lon = float(bus['longitude'])
             bus_route_id = bus['route_id']
             
-            # Only show buses that haven't passed this stop yet
+            # current_stop_sequence now uses MapBox for accurate positioning:
+            # - If bus is at stop N (within 150m road distance): sequence = N
+            # - If bus departed stop N and heading to N+1: sequence = N+1
+            # So: sequence > stop_sequence means bus has passed this stop
+            #     sequence == stop_sequence means bus is AT or APPROACHING this stop
+            #     sequence < stop_sequence means bus is approaching this stop
             stop_sequence = route_sequences.get(bus_route_id, 0)
-            bus_sequence = bus['current_stop_sequence'] or 0
+            bus_sequence = int(bus['current_stop_sequence'] or 0)
             
-            if bus_sequence >= stop_sequence:
-                continue  # Bus has already passed or is at this stop
+            if bus_sequence > stop_sequence:
+                continue  # Bus has already passed this stop
             
-            # Calculate distance to stop
-            distance = calculate_distance(bus_lat, bus_lon, stop_lat, stop_lon)
+            # Get ETA using MapBox
+            eta_result = get_eta_to_stop(
+                bus_location=(bus_lon, bus_lat),
+                stop_location=(stop_lon, stop_lat)
+            )
             
-            # Estimate ETA based on speed (or default 25 km/h)
-            speed_kmh = float(bus['speed']) if bus['speed'] and float(bus['speed']) > 0 else 25
-            eta_minutes = (distance / 1000) / speed_kmh * 60
+            # Fallback if MapBox fails
+            if not eta_result:
+                logger.warning(f"MapBox API failed for bus {bus['bus_id']}, using fallback")
+                speed_kmh = float(bus['speed']) if bus['speed'] and float(bus['speed']) > 0 else 25
+                eta_result = fallback_eta(bus_lat, bus_lon, stop_lat, stop_lon, speed_kmh)
+            
+            distance_to_stop = eta_result['distance_meters']
+            eta_minutes = eta_result['eta_minutes']
+            
+            # Determine arrival status based on distance (150m threshold for "at stop")
+            AT_STOP_THRESHOLD = 150
+            if distance_to_stop <= AT_STOP_THRESHOLD:
+                arrival_status = 'arrived'
+                eta_minutes = 0
+                distance_to_stop = 0
+            elif eta_minutes <= 1:
+                arrival_status = 'arriving'
+            elif eta_minutes <= 3:
+                arrival_status = 'approaching'
+            else:
+                arrival_status = 'on-route'
             
             etas.append({
                 'bus_id': bus['bus_id'],
@@ -125,10 +137,11 @@ class StopETAsView(APIView):
                 'route_name': bus['route_name'],
                 'route_code': bus['route_code'],
                 'route_color': bus['color'],
-                'eta_minutes': round(eta_minutes, 1),
-                'distance_meters': round(distance),
+                'eta_minutes': eta_minutes,
+                'distance_meters': distance_to_stop,
                 'current_latitude': bus_lat,
-                'current_longitude': bus_lon
+                'current_longitude': bus_lon,
+                'arrival_status': arrival_status
             })
         
         # Sort by ETA
@@ -197,36 +210,76 @@ class RouteETAsView(APIView):
             bus_lat = float(bus['latitude'])
             bus_lon = float(bus['longitude'])
             bus_sequence = bus['current_stop_sequence'] or 0
-            speed_kmh = float(bus['speed']) if bus['speed'] and float(bus['speed']) > 0 else 25
             
-            # Calculate ETAs to upcoming stops
-            next_stops = []
-            cumulative_distance = 0
-            prev_lat, prev_lon = bus_lat, bus_lon
-            
+            # Get upcoming stops for this bus
+            upcoming_stops = []
             for stop in stops:
                 if stop['sequence_number'] <= bus_sequence:
                     continue  # Already passed this stop
-                
-                stop_lat = float(stop['latitude'])
-                stop_lon = float(stop['longitude'])
-                
-                # Calculate distance from previous point (bus or last stop)
-                segment_distance = calculate_distance(prev_lat, prev_lon, stop_lat, stop_lon)
-                cumulative_distance += segment_distance
-                
-                # Estimate ETA
-                eta_minutes = (cumulative_distance / 1000) / speed_kmh * 60
-                
-                next_stops.append({
+                upcoming_stops.append({
+                    'sequence': stop['sequence_number'],
                     'stop_id': stop['stop_id'],
                     'stop_name': stop['stop_name'],
-                    'sequence': stop['sequence_number'],
-                    'eta_minutes': round(eta_minutes, 1),
-                    'distance_meters': round(cumulative_distance)
+                    'latitude': float(stop['latitude']),
+                    'longitude': float(stop['longitude'])
                 })
+            
+            if not upcoming_stops:
+                continue
+            
+            # Prepare stop locations for MapBox: (lon, lat, stop_id, stop_name)
+            stop_locations = [
+                (s['longitude'], s['latitude'], s['stop_id'], s['stop_name'])
+                for s in upcoming_stops
+            ]
+            
+            # Use MapBox API for multi-stop ETA calculation
+            eta_results = get_etas_to_multiple_stops(
+                bus_location=(bus_lon, bus_lat),
+                stop_locations=stop_locations
+            )
+            
+            # If MapBox fails, use fallback
+            if not eta_results:
+                logger.warning(f"MapBox API failed for bus {bus['bus_id']}, using fallback")
+                speed_kmh = float(bus['speed']) if bus['speed'] and float(bus['speed']) > 0 else 25
+                cumulative_eta = 0
+                cumulative_distance = 0
+                prev_lat, prev_lon = bus_lat, bus_lon
                 
-                prev_lat, prev_lon = stop_lat, stop_lon
+                eta_results = []
+                for stop_info in upcoming_stops:
+                    # Calculate incremental ETA using fallback
+                    segment = fallback_eta(
+                        prev_lat, prev_lon,
+                        stop_info['latitude'], stop_info['longitude'],
+                        speed_kmh
+                    )
+                    cumulative_eta += segment['eta_minutes']
+                    cumulative_distance += segment['distance_meters']
+                    
+                    eta_results.append({
+                        'stop_id': stop_info['stop_id'],
+                        'stop_name': stop_info['stop_name'],
+                        'eta_minutes': round(cumulative_eta, 1),
+                        'distance_meters': round(cumulative_distance)
+                    })
+                    
+                    prev_lat = stop_info['latitude']
+                    prev_lon = stop_info['longitude']
+            
+            # Build next_stops response
+            next_stops = []
+            for i, stop_info in enumerate(upcoming_stops):
+                if i < len(eta_results):
+                    eta = eta_results[i]
+                    next_stops.append({
+                        'stop_id': eta['stop_id'],
+                        'stop_name': eta['stop_name'],
+                        'sequence': stop_info['sequence'],
+                        'eta_minutes': eta['eta_minutes'],
+                        'distance_meters': eta['distance_meters']
+                    })
             
             bus_data.append({
                 'bus_id': bus['bus_id'],
