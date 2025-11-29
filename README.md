@@ -1205,6 +1205,283 @@ DELETE /api/announcements/{id}/
 
 ---
 
+### Display Units (SMD)
+
+#### List All Displays
+```
+GET /api/displays/
+```
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| search | Filter by name or location |
+| status | Filter by status (`online`, `offline`, `error`) |
+| stop_id | Filter by stop ID |
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "name": "F-10 Markaz Display",
+    "stop_id": 5,
+    "stop": {
+      "id": 5,
+      "name": "F-10 Markaz",
+      "latitude": 33.6985,
+      "longitude": 73.0152
+    },
+    "location": "Main entrance, facing road",
+    "status": "online",
+    "last_heartbeat": "2025-11-30T10:30:00",
+    "created_at": "2025-11-20T08:00:00",
+    "updated_at": "2025-11-30T10:30:00"
+  }
+]
+```
+
+---
+
+#### Get Display Details
+```
+GET /api/displays/{id}/
+```
+
+**Response:** `200 OK` - Same format as list item
+
+**Error:** `404 Not Found`
+```json
+{
+  "detail": "Display not found"
+}
+```
+
+---
+
+#### Create Display
+```
+POST /api/displays/
+```
+
+**Request:**
+```json
+{
+  "name": "Blue Area Display",
+  "stop_id": 12,
+  "location": "Near bus shelter",
+  "status": "offline"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | Yes | Display name (min 2 chars) |
+| stop_id | integer | Yes | Stop where display is installed |
+| location | string | No | Physical location description |
+| status | string | No | `online`, `offline`, `error` (default: offline) |
+
+**Response:** `201 Created`
+
+---
+
+#### Update Display
+```
+PATCH /api/displays/{id}/
+```
+
+**Request:** (all fields optional)
+```json
+{
+  "name": "Updated Display Name",
+  "stop_id": 15,
+  "location": "New location",
+  "status": "online"
+}
+```
+
+**Response:** `200 OK` - Returns updated display
+
+---
+
+#### Delete Display
+```
+DELETE /api/displays/{id}/
+```
+
+**Response:** `204 No Content`
+
+---
+
+#### Update Display Heartbeat
+```
+POST /api/displays/{id}/heartbeat/
+```
+
+Called by SMD devices to report their status.
+
+**Request:**
+```json
+{
+  "status": "online"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "id": 1,
+  "status": "online",
+  "last_heartbeat": "2025-11-30T12:00:00",
+  "message": "Heartbeat recorded"
+}
+```
+
+---
+
+#### Get Display Content
+```
+GET /api/displays/{id}/content/
+```
+
+Returns all content for SMD display: upcoming buses, announcements, and ads.
+
+**Response:** `200 OK`
+```json
+{
+  "display": {
+    "id": 1,
+    "name": "F-10 Markaz Display",
+    "stop_id": 5
+  },
+  "stop": {
+    "id": 5,
+    "name": "F-10 Markaz",
+    "latitude": 33.6985,
+    "longitude": 73.0152
+  },
+  "upcoming_buses": [
+    {
+      "bus_id": 3,
+      "registration_number": "ISB-1142",
+      "route_id": 1,
+      "route_name": "Saddar to Faisal Mosque",
+      "route_code": "R-11",
+      "route_color": "#0ea5e9",
+      "eta_minutes": 5,
+      "distance_meters": 1200,
+      "arrival_status": "approaching"
+    }
+  ],
+  "announcements": [
+    {
+      "id": 1,
+      "title": "Service Alert",
+      "message": "Route R-11 experiencing delays",
+      "message_ur": "روٹ R-11 تاخیر کا شکار",
+      "severity": "warning"
+    }
+  ],
+  "advertisements": [
+    {
+      "id": 5,
+      "title": "Jazz 4G Promo",
+      "content_url": "https://example.com/ad.jpg",
+      "media_type": "image",
+      "duration_seconds": 10,
+      "priority": 1
+    }
+  ],
+  "timestamp": "2025-11-30T12:05:00"
+}
+```
+
+**Arrival Status Values:**
+- `arriving` - ETA ≤ 1 minute
+- `approaching` - ETA ≤ 3 minutes
+- `on-route` - ETA > 3 minutes
+
+---
+
+### ETAs (Estimated Time of Arrival)
+
+#### Get Stop ETAs
+```
+GET /api/stops/{stop_id}/etas/
+```
+
+Get ETAs for all buses approaching a specific stop.
+
+**Query Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| route_id | Filter by specific route |
+
+**Response:** `200 OK`
+```json
+{
+  "stop": {
+    "id": 5,
+    "name": "F-10 Markaz"
+  },
+  "etas": [
+    {
+      "bus_id": 3,
+      "registration_number": "ISB-1142",
+      "route_id": 1,
+      "route_name": "Saddar to Faisal Mosque",
+      "route_code": "R-11",
+      "route_color": "#0ea5e9",
+      "eta_minutes": 5,
+      "distance_meters": 1200,
+      "current_latitude": 33.6900,
+      "current_longitude": 73.0100
+    }
+  ],
+  "timestamp": "2025-11-30T12:05:00"
+}
+```
+
+---
+
+#### Get Route ETAs
+```
+GET /api/routes/{route_id}/etas/
+```
+
+Get ETAs for all buses on a route at upcoming stops.
+
+**Response:** `200 OK`
+```json
+{
+  "route": {
+    "id": 1,
+    "name": "Saddar to Faisal Mosque",
+    "code": "R-11",
+    "color": "#0ea5e9"
+  },
+  "buses": [
+    {
+      "bus_id": 3,
+      "registration_number": "ISB-1142",
+      "current_stop_sequence": 4,
+      "next_stops": [
+        {
+          "stop_id": 5,
+          "stop_name": "F-10 Markaz",
+          "sequence": 5,
+          "eta_minutes": 5,
+          "distance_meters": 1200
+        }
+      ]
+    }
+  ],
+  "timestamp": "2025-11-30T12:05:00"
+}
+```
+
+---
+
 ## Error Responses
 
 | Status Code | Description |
@@ -1269,6 +1546,15 @@ DELETE /api/announcements/{id}/
 | `/api/announcements/{id}/` | GET | ✅ | ❌ | Get announcement details |
 | `/api/announcements/{id}/` | PATCH | ✅ | ❌ | Update announcement |
 | `/api/announcements/{id}/` | DELETE | ✅ | ❌ | Delete announcement |
+| `/api/displays/` | GET | ✅ | ❌ | List all display units |
+| `/api/displays/` | POST | ✅ | ✅ | Create display unit |
+| `/api/displays/{id}/` | GET | ✅ | ❌ | Get display details |
+| `/api/displays/{id}/` | PATCH | ✅ | ✅ | Update display unit |
+| `/api/displays/{id}/` | DELETE | ✅ | ✅ | Delete display unit |
+| `/api/displays/{id}/heartbeat/` | POST | ✅ | ❌ | Update display heartbeat |
+| `/api/displays/{id}/content/` | GET | ✅ | ❌ | Get display content (buses, announcements, ads) |
+| `/api/stops/{id}/etas/` | GET | ✅ | ❌ | Get ETAs for buses approaching stop |
+| `/api/routes/{id}/etas/` | GET | ✅ | ❌ | Get ETAs for buses on route |
 
 ---
 
