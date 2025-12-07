@@ -327,12 +327,12 @@ class DisplayContentView(APIView):
         stop_lat = float(display['stop_latitude'])
         stop_lon = float(display['stop_longitude'])
         
-        # Get routes that pass through this stop
+        # Get routes that pass through this stop (only non-passed stops)
         routes_at_stop = execute_query(
             """
             SELECT DISTINCT rs.route_id, rs.sequence_number
             FROM route_stops rs
-            WHERE rs.stop_id = %s
+            WHERE rs.stop_id = %s AND rs.passed = FALSE
             """,
             [stop_id]
         )

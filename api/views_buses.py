@@ -445,7 +445,15 @@ class BusLocationView(APIView):
         
         # Check if bus exists and get route
         bus = execute_query_one(
-            "SELECT bus_id, route_id FROM buses WHERE bus_id = %s",
+            """
+            SELECT 
+                b.bus_id, 
+                b.route_id, 
+                bl.current_stop_sequence
+            FROM buses b
+            JOIN bus_locations bl ON b.bus_id = bl.bus_id
+            WHERE b.bus_id = %s
+            """,
             [bus_id]
         )
         if not bus:
@@ -459,7 +467,9 @@ class BusLocationView(APIView):
         heading = min(max(float(request.data.get('heading', 0) or 0), 0), 360)
         
         # Calculate current_stop_sequence using MapBox for accurate road-based positioning
-        # This determines which stop the bus is at or heading toward
+        # This determines which stop the bus is at or heading toward.
+        current_stop_seq_from_db = bus.get('current_stop_sequence') or 0
+        print(current_stop_seq_from_db)
         current_stop_sequence = None
         
         if bus['route_id']:
@@ -489,7 +499,8 @@ class BusLocationView(APIView):
                 # Use MapBox to determine bus position on route
                 position = get_bus_position_on_route(
                     bus_location=(longitude, latitude),  # MapBox uses (lon, lat)
-                    route_stops=route_stops
+                    route_stops=route_stops,
+                    stop_seq=current_stop_seq_from_db
                 )
                 
                 current_stop_sequence = position['current_stop_sequence']
@@ -497,6 +508,18 @@ class BusLocationView(APIView):
                            f"sequence={current_stop_sequence}, "
                            f"next_stop={position['next_stop']}, "
                            f"eta={position['eta_to_next']}min")
+                
+                # CRITICAL: If bus is AT a stop (within 30m), mark it as passed
+                if position['is_at_stop'] and current_stop_sequence:
+                    execute_update(
+                        """
+                        UPDATE route_stops 
+                        SET passed = TRUE 
+                        WHERE route_id = %s AND sequence_number = %s
+                        """,
+                        [bus['route_id'], current_stop_sequence]
+                    )
+                    logger.info(f"✅ Marked stop {current_stop_sequence} as PASSED for route {bus['route_id']}")
         
         # Upsert location record (update if exists, insert if not)
         # This keeps only the latest location per bus
@@ -591,11 +614,40 @@ class BusStartTripView(APIView):
             [route_id, bus_id]
         )
         
+        # Reset bus location to start of route (sequence 0 = trip not started yet)
+        execute_update(
+            """
+            INSERT INTO bus_locations 
+            (bus_id, latitude, longitude, speed, heading, current_stop_sequence, recorded_at)
+            VALUES (%s, 0, 0, 0, 0, 0, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE
+                current_stop_sequence = 0,
+                latitude = 0,
+                longitude = 0,
+                speed = 0,
+                heading = 0,
+                recorded_at = CURRENT_TIMESTAMP
+            """,
+            [bus_id]
+        )
+        
+        # CRITICAL: Reset all 'passed' flags for this route to FALSE
+        # This allows all stops to be visited fresh on the new trip
+        execute_update(
+            """
+            UPDATE route_stops 
+            SET passed = FALSE 
+            WHERE route_id = %s
+            """,
+            [route_id]
+        )
+        
         return Response({
             'bus_id': bus_id,
             'status': 'active',
             'route_id': route_id,
-            'message': 'Bus is now active'
+            'current_stop_sequence': 0,
+            'message': 'Bus trip started - all stops reset'
         }, status=status.HTTP_200_OK)
 
 

@@ -54,6 +54,7 @@ class Command(BaseCommand):
                 stop_id INT NOT NULL,
                 sequence_number INT NOT NULL,
                 distance_from_prev_meters INT DEFAULT 0,
+                passed BOOLEAN DEFAULT FALSE,
                 CONSTRAINT pk_route_stops PRIMARY KEY (route_stop_id),
                 CONSTRAINT uk_route_stops UNIQUE (route_id, stop_id),
                 CONSTRAINT fk_route_stops_route_id FOREIGN KEY (route_id)

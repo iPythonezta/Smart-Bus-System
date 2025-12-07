@@ -274,141 +274,124 @@ def fallback_eta(lat1: float, lon1: float, lat2: float, lon2: float, speed_kmh: 
 
 def get_bus_position_on_route(
     bus_location: Tuple[float, float],
-    route_stops: List[Dict]
+    route_stops: List[Dict],
+    stop_seq: int = None
 ) -> Dict:
     """
-    Determine which stop the bus has passed and which it's heading to,
-    using MapBox to calculate actual road distances.
+    SIMPLIFIED LOGIC - Clear state machine for bus position.
+    
+    Rules:
+    1. If within 30m of ANY stop >= stop_seq: Bus is AT that stop
+    2. If not at any stop: Bus is HEADING TO the nearest upcoming stop
+    3. Sequence only increases when bus gets within 30m of next stop
     
     Args:
         bus_location: (longitude, latitude) of bus
         route_stops: List of stops with 'sequence', 'stop_id', 'longitude', 'latitude'
+        stop_seq: Current stop sequence from DB
     
     Returns:
-        Dict with:
-        - 'last_passed_stop': sequence of last stop bus has passed (or is at)
-        - 'next_stop': sequence of next stop bus is heading to
-        - 'is_at_stop': True if bus is at a stop (within threshold)
-        - 'current_stop_sequence': The sequence to store in DB
-        - 'distance_to_next': Distance in meters to next stop
-        - 'eta_to_next': ETA in minutes to next stop
+        Dict with current_stop_sequence and other metadata
     """
     if not route_stops:
         return {
             'last_passed_stop': 0,
             'next_stop': 1,
             'is_at_stop': False,
-            'current_stop_sequence': 1,
+            'current_stop_sequence': 0,
             'distance_to_next': None,
             'eta_to_next': None
         }
     
-    # Sort stops by sequence
+    # Initialize
     stops = sorted(route_stops, key=lambda x: x['sequence'])
+    if stop_seq is None:
+        stop_seq = 0
     
-    # Get distances from bus to each stop using MapBox
-    stop_distances = []
+    # Thresholds
+    AT_STOP_THRESHOLD = 30  # meters - bus is physically at stop
+    
+    # Calculate distances to upcoming stops
+    # Key insight: stop_seq represents the stop we're currently targeting (at or heading to)
+    # We only consider stops >= stop_seq (current target and beyond)
+    upcoming_stops = []
     for stop in stops:
+        # Skip stops before our current target
+        if stop["sequence"] < stop_seq:
+            continue
+        
         stop_loc = (stop['longitude'], stop['latitude'])
         result = get_eta_to_stop(bus_location, stop_loc)
         
         if result:
-            stop_distances.append({
+            upcoming_stops.append({
                 'sequence': stop['sequence'],
                 'stop_id': stop['stop_id'],
                 'distance': result['distance_meters'],
                 'eta': result['eta_minutes']
             })
         else:
-            # Fallback to haversine
+            # Fallback
             dist = haversine_distance(
-                bus_location[1], bus_location[0],  # lat, lon
+                bus_location[1], bus_location[0],
                 stop['latitude'], stop['longitude']
             )
-            stop_distances.append({
+            upcoming_stops.append({
                 'sequence': stop['sequence'],
                 'stop_id': stop['stop_id'],
-                'distance': dist * 1.3,  # 30% buffer
-                'eta': (dist * 1.3 / 1000) / 25 * 60  # Assume 25 km/h
+                'distance': dist * 1.3,
+                'eta': (dist * 1.3 / 1000) / 25 * 60
             })
     
-    # Find the nearest stop
-    nearest = min(stop_distances, key=lambda x: x['distance'])
+    # No more stops left
+    if not upcoming_stops:
+        logger.info(f"Bus completed route at stop {stop_seq}")
+        return {
+            'last_passed_stop': stop_seq,
+            'next_stop': stop_seq,
+            'is_at_stop': False,
+            'current_stop_sequence': stop_seq,
+            'distance_to_next': None,
+            'eta_to_next': None
+        }
     
-    # Threshold: if within 150m (road distance), consider bus "at" the stop
-    AT_STOP_THRESHOLD = 150  # meters
+    # Find nearest upcoming stop
+    nearest = min(upcoming_stops, key=lambda x: x['distance'])
     
+    # === STATE 1: Bus is AT a stop (within 30m) ===
     if nearest['distance'] <= AT_STOP_THRESHOLD:
-        # Bus is at this stop
+        # Find next stop after this one
+        next_stop_seq = None
+        for s in upcoming_stops:
+            if s['sequence'] > nearest['sequence']:
+                next_stop_seq = s['sequence']
+                break
+        
+        logger.info(f"Bus AT stop {nearest['sequence']} (distance: {nearest['distance']}m)")
         return {
             'last_passed_stop': nearest['sequence'],
-            'next_stop': nearest['sequence'] + 1 if nearest['sequence'] < len(stops) else nearest['sequence'],
+            'next_stop': next_stop_seq if next_stop_seq else nearest['sequence'],
             'is_at_stop': True,
-            'current_stop_sequence': nearest['sequence'],
+            'current_stop_sequence': nearest['sequence'],  # Update to this stop
             'distance_to_next': 0,
             'eta_to_next': 0
         }
     
-    # Bus is not at any stop - find which segment it's on
-    # The bus is between stop A and stop B if:
-    # distance(bus→A) + distance(bus→B) ≈ distance(A→B)
-    # And distance(bus→B) < distance(bus→A) means heading toward B
+    # === STATE 2: Bus is BETWEEN stops (> 30m from all) ===
     
-    # Simpler approach: find the stop where the bus is closest,
-    # then check if it's heading toward it or away from it
-    # by comparing distances to adjacent stops
+    # Strategy: current_stop_sequence always points to the NEAREST upcoming stop
+    # This naturally handles departure - when bus leaves, the NEXT stop becomes nearest
     
-    nearest_idx = next(i for i, s in enumerate(stop_distances) if s['sequence'] == nearest['sequence'])
-    
-    # Check previous and next stops to determine direction
-    if nearest_idx == 0:
-        # Nearest is first stop - bus is approaching first stop
-        return {
-            'last_passed_stop': 0,
-            'next_stop': nearest['sequence'],
-            'is_at_stop': False,
-            'current_stop_sequence': nearest['sequence'],
-            'distance_to_next': round(nearest['distance']),
-            'eta_to_next': round(nearest['eta'], 1)
-        }
-    
-    if nearest_idx == len(stop_distances) - 1:
-        # Nearest is last stop - bus is heading to last stop
-        return {
-            'last_passed_stop': stop_distances[nearest_idx - 1]['sequence'],
-            'next_stop': nearest['sequence'],
-            'is_at_stop': False,
-            'current_stop_sequence': nearest['sequence'],
-            'distance_to_next': round(nearest['distance']),
-            'eta_to_next': round(nearest['eta'], 1)
-        }
-    
-    # Bus is between stops - determine if it passed the nearest stop or not
-    prev_stop = stop_distances[nearest_idx - 1]
-    next_stop = stop_distances[nearest_idx + 1]
-    
-    # If distance to previous stop > distance to nearest stop, 
-    # bus has passed previous and is heading to nearest
-    if prev_stop['distance'] > nearest['distance']:
-        # Bus is heading TOWARD nearest stop (hasn't reached it yet)
-        return {
-            'last_passed_stop': prev_stop['sequence'],
-            'next_stop': nearest['sequence'],
-            'is_at_stop': False,
-            'current_stop_sequence': nearest['sequence'],
-            'distance_to_next': round(nearest['distance']),
-            'eta_to_next': round(nearest['eta'], 1)
-        }
-    else:
-        # Bus has passed nearest stop and is heading to next
-        return {
-            'last_passed_stop': nearest['sequence'],
-            'next_stop': next_stop['sequence'],
-            'is_at_stop': False,
-            'current_stop_sequence': next_stop['sequence'],
-            'distance_to_next': round(next_stop['distance']),
-            'eta_to_next': round(next_stop['eta'], 1)
-        }
+    # Bus is heading toward the nearest upcoming stop
+    logger.info(f"Bus heading to stop {nearest['sequence']} (distance: {nearest['distance']}m, current_seq: {stop_seq})")
+    return {
+        'last_passed_stop': max(0, nearest['sequence'] - 1),
+        'next_stop': nearest['sequence'],
+        'is_at_stop': False,
+        'current_stop_sequence': nearest['sequence'],  # Always target nearest
+        'distance_to_next': round(nearest['distance']),
+        'eta_to_next': round(nearest['eta'], 1)
+    }
 
 
 def has_bus_passed_stop(

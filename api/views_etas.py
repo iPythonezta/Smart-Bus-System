@@ -38,11 +38,11 @@ class StopETAsView(APIView):
         # Get optional route filter
         route_id_filter = request.query_params.get('route_id')
         
-        # Get routes that pass through this stop
+        # Get routes that pass through this stop (only non-passed stops)
         route_sql = """
             SELECT rs.route_id, rs.sequence_number
             FROM route_stops rs
-            WHERE rs.stop_id = %s
+            WHERE rs.stop_id = %s AND rs.passed = FALSE
         """
         route_params = [stop_id]
         
@@ -116,9 +116,9 @@ class StopETAsView(APIView):
             
             distance_to_stop = eta_result['distance_meters']
             eta_minutes = eta_result['eta_minutes']
-            
-            # Determine arrival status based on distance (150m threshold for "at stop")
-            AT_STOP_THRESHOLD = 150
+
+            # Determine arrival status based on distance (60m threshold for "at stop")
+            AT_STOP_THRESHOLD = 60
             if distance_to_stop <= AT_STOP_THRESHOLD:
                 arrival_status = 'arrived'
                 eta_minutes = 0
@@ -175,11 +175,11 @@ class RouteETAsView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Get all stops on this route
+        # Get all stops on this route (including passed status)
         stops = execute_query(
             """
             SELECT 
-                rs.sequence_number, rs.stop_id,
+                rs.sequence_number, rs.stop_id, rs.passed,
                 s.stop_name, s.latitude, s.longitude
             FROM route_stops rs
             JOIN stops s ON rs.stop_id = s.stop_id
@@ -211,10 +211,11 @@ class RouteETAsView(APIView):
             bus_lon = float(bus['longitude'])
             bus_sequence = bus['current_stop_sequence'] or 0
             
-            # Get upcoming stops for this bus
+            # Get upcoming stops for this bus (only non-passed stops)
             upcoming_stops = []
             for stop in stops:
-                if stop['sequence_number'] <= bus_sequence:
+                # Skip if stop is marked as passed OR if sequence is less than bus's current sequence
+                if stop['passed'] or stop['sequence_number'] < bus_sequence:
                     continue  # Already passed this stop
                 upcoming_stops.append({
                     'sequence': stop['sequence_number'],
