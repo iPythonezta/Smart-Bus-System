@@ -59,7 +59,7 @@ ROOT_URLCONF = 'smartbus.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'dist'],  # Add dist folder for frontend templates
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -125,7 +125,12 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/assets/'
+STATICFILES_DIRS = [
+    BASE_DIR / 'dist' / 'assets',  # Serve compiled frontend assets (JS, CSS)
+    BASE_DIR / 'dist',  # Serve root-level static files (vite.svg, etc.)
+]
+STATIC_ROOT = BASE_DIR / 'staticfiles'  # For production collectstatic
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
