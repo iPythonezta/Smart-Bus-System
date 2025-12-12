@@ -504,22 +504,42 @@ class BusLocationView(APIView):
                 )
                 
                 current_stop_sequence = position['current_stop_sequence']
+                eta_to_next = position['eta_to_next']  # ETA in minutes
+                
                 logger.info(f"Bus {bus_id} position: at_stop={position['is_at_stop']}, "
                            f"sequence={current_stop_sequence}, "
                            f"next_stop={position['next_stop']}, "
-                           f"eta={position['eta_to_next']}min")
+                           f"eta={eta_to_next}min")
                 
-                # CRITICAL: If bus is AT a stop (within 30m), mark it as passed
-                if position['is_at_stop'] and current_stop_sequence:
-                    execute_update(
+                # ===== SIMPLIFIED ETA-BASED STOP MARKING =====
+                # When ETA < 2 min: Mark stop as passed immediately
+                # Simple and straightforward!
+                
+                PASSED_ETA_THRESHOLD = 1.0  # minutes - mark passed when ETA drops below this
+                
+                # Check if bus is close to current stop (ETA < 2 min)
+                if eta_to_next is not None and eta_to_next < PASSED_ETA_THRESHOLD:
+                    # Get current stop's passed status
+                    stop_data = execute_query_one(
                         """
-                        UPDATE route_stops 
-                        SET passed = TRUE 
+                        SELECT passed 
+                        FROM route_stops 
                         WHERE route_id = %s AND sequence_number = %s
                         """,
                         [bus['route_id'], current_stop_sequence]
                     )
-                    logger.info(f"✅ Marked stop {current_stop_sequence} as PASSED for route {bus['route_id']}")
+                    
+                    # If not already marked as passed, mark it now
+                    if stop_data and not stop_data['passed']:
+                        execute_update(
+                            """
+                            UPDATE route_stops 
+                            SET passed = TRUE 
+                            WHERE route_id = %s AND sequence_number = %s
+                            """,
+                            [bus['route_id'], current_stop_sequence]
+                        )
+                        logger.info(f"✅ Marked stop {current_stop_sequence} as PASSED (ETA: {eta_to_next} min < 2 min threshold)")
         
         # Upsert location record (update if exists, insert if not)
         # This keeps only the latest location per bus
@@ -631,12 +651,12 @@ class BusStartTripView(APIView):
             [bus_id]
         )
         
-        # CRITICAL: Reset all 'passed' flags for this route to FALSE
+        # CRITICAL: Reset all 'passed' flags for this route
         # This allows all stops to be visited fresh on the new trip
         execute_update(
             """
             UPDATE route_stops 
-            SET passed = FALSE 
+            SET passed = FALSE
             WHERE route_id = %s
             """,
             [route_id]

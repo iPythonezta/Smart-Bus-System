@@ -90,6 +90,21 @@ class StopETAsView(APIView):
             bus_lon = float(bus['longitude'])
             bus_route_id = bus['route_id']
             
+            # CRITICAL CHECK: Verify if this specific stop is marked as passed for this bus's route
+            # This ensures buses don't show ETA to stops they've already passed
+            stop_passed_check = execute_query_one(
+                """
+                SELECT passed FROM route_stops 
+                WHERE route_id = %s AND stop_id = %s
+                """,
+                [bus_route_id, stop_id]
+            )
+            
+            # If stop is marked as passed for this bus's route, skip this bus
+            if stop_passed_check and stop_passed_check['passed']:
+                logger.info(f"Bus {bus['bus_id']} skipped - stop {stop_id} marked as passed on route {bus_route_id}")
+                continue
+            
             # current_stop_sequence now uses MapBox for accurate positioning:
             # - If bus is at stop N (within 150m road distance): sequence = N
             # - If bus departed stop N and heading to N+1: sequence = N+1
@@ -100,7 +115,7 @@ class StopETAsView(APIView):
             bus_sequence = int(bus['current_stop_sequence'] or 0)
             
             if bus_sequence > stop_sequence:
-                continue  # Bus has already passed this stop
+                continue  # Bus has already passed this stop (backup check)
             
             # Get ETA using MapBox
             eta_result = get_eta_to_stop(
