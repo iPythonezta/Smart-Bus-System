@@ -419,34 +419,28 @@ class DisplayContentView(APIView):
         # Sort by ETA
         upcoming_buses.sort(key=lambda x: x['eta_minutes'])
         
-        # Get active announcements for routes at this stop (or global)
-        announcements = []
-        announcement_sql = """
+        # Get ALL active announcements (not dependent on buses/routes)
+        # Displays should show all current announcements regardless of bus arrivals
+        announcement_rows = execute_query(
+            """
             SELECT DISTINCT
                 a.announcement_id, a.title, a.message, a.message_ur, a.severity
             FROM announcements a
-            LEFT JOIN announcement_routes ar ON a.announcement_id = ar.announcement_id
             WHERE NOW() BETWEEN a.start_time AND a.end_time
-        """
-        
-        if route_ids:
-            placeholders = ','.join(['%s'] * len(route_ids))
-            announcement_sql += f"""
-                AND (ar.route_id IN ({placeholders}) OR ar.route_id IS NULL)
+            ORDER BY a.severity DESC, a.announcement_id DESC
             """
-            announcement_rows = execute_query(announcement_sql, route_ids)
-        else:
-            announcement_sql += " AND ar.route_id IS NULL"
-            announcement_rows = execute_query(announcement_sql)
+        )
         
-        for ann in announcement_rows:
-            announcements.append({
+        announcements = [
+            {
                 'id': ann['announcement_id'],
                 'title': ann['title'],
                 'message': ann['message'],
                 'message_ur': ann.get('message_ur'),
                 'severity': ann['severity']
-            })
+            }
+            for ann in announcement_rows
+        ]
         
         # Get active advertisements scheduled for this display
         ads = execute_query(

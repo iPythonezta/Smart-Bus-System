@@ -162,7 +162,27 @@ class Command(BaseCommand):
             """,
 
             # =====================================================
-            # ADVERTISEMENTS TABLE
+            # ADVERTISERS TABLE (3NF Normalization)
+            # =====================================================
+            """
+            CREATE TABLE IF NOT EXISTS advertisers (
+                advertiser_id INT AUTO_INCREMENT,
+                advertiser_name VARCHAR(100) NOT NULL,
+                contact_email VARCHAR(100),
+                contact_phone VARCHAR(20),
+                address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                CONSTRAINT pk_advertisers PRIMARY KEY (advertiser_id),
+                CONSTRAINT uk_advertisers_name UNIQUE (advertiser_name),
+                INDEX idx_advertiser_name (advertiser_name)
+            )
+            """,
+
+            # =====================================================
+            # ADVERTISEMENTS TABLE (3NF Normalized)
+            # Removed advertiser_name and advertiser_contact (transitive dependency)
+            # Now references advertisers table via advertiser_id FK
             # =====================================================
             """
             CREATE TABLE IF NOT EXISTS advertisements (
@@ -171,13 +191,16 @@ class Command(BaseCommand):
                 content_url VARCHAR(500) NOT NULL,
                 media_type ENUM('image', 'youtube') NOT NULL DEFAULT 'image',
                 duration_sec INT NOT NULL DEFAULT 15,
-                advertiser_name VARCHAR(100) NOT NULL,
-                advertiser_contact VARCHAR(100),
+                advertiser_id INT NOT NULL,
                 metadata JSON,
                 is_active BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                CONSTRAINT pk_advertisements PRIMARY KEY (ad_id)
+                CONSTRAINT pk_advertisements PRIMARY KEY (ad_id),
+                CONSTRAINT fk_advertisements_advertiser FOREIGN KEY (advertiser_id)
+                    REFERENCES advertisers (advertiser_id) ON DELETE RESTRICT,
+                INDEX idx_advertiser (advertiser_id),
+                INDEX idx_is_active (is_active)
             )
             """,
 
@@ -231,7 +254,8 @@ class Command(BaseCommand):
             'display_units',
             'announcements',
             'announcement_routes',
-            'advertisements',
+            'advertisers',        # NEW: 3NF normalization
+            'advertisements',     # UPDATED: Now uses advertiser_id FK
             'ad_schedule',
             'audit_logs',
         ]

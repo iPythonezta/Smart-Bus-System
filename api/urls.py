@@ -11,6 +11,7 @@ from .views_routes import (
     RouteStopsView, RouteStopDetailView, RouteStopsReorderView
 )
 from .views_advertisements import AdvertisementListView, AdvertisementDetailView
+from .views_advertisers import AdvertiserListView, AdvertiserDetailView
 from .views_ad_schedules import AdScheduleListView, AdScheduleDetailView
 from .views_announcements import AnnouncementListView, AnnouncementDetailView
 from .views_displays import (
@@ -48,6 +49,10 @@ urlpatterns = [
     path('routes/<int:route_id>/stops/reorder/', RouteStopsReorderView.as_view(), name='route_stops_reorder'),
     path('routes/<int:route_id>/stops/<int:route_stop_id>/', RouteStopDetailView.as_view(), name='route_stop_detail'),
     path('routes/<int:route_id>/etas/', RouteETAsView.as_view(), name='route_etas'),
+    
+    # Advertiser endpoints (3NF normalization)
+    path('advertisers/', AdvertiserListView.as_view(), name='advertiser_list'),
+    path('advertisers/<int:advertiser_id>/', AdvertiserDetailView.as_view(), name='advertiser_detail'),
     
     # Advertisement endpoints
     path('advertisements/', AdvertisementListView.as_view(), name='advertisement_list'),

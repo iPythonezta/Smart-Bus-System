@@ -18,14 +18,21 @@ def format_ad_response(ad):
         except (json.JSONDecodeError, TypeError):
             metadata = None
     
+    # Format advertiser object (3NF structure)
+    advertiser = {
+        'id': ad.get('advertiser_id'),
+        'name': ad.get('advertiser_name'),
+        'contact_phone': ad.get('contact_phone'),
+        'contact_email': ad.get('contact_email')
+    }
+    
     return {
         'id': ad['ad_id'],
         'title': ad['title'],
         'content_url': ad['content_url'],
         'media_type': ad['media_type'],
         'duration_seconds': ad['duration_sec'],
-        'advertiser_name': ad['advertiser_name'],
-        'advertiser_contact': ad.get('advertiser_contact'),
+        'advertiser': advertiser,  # Nested advertiser object (3NF)
         'metadata': metadata,
         'created_at': ad['created_at'].isoformat() if ad.get('created_at') else None,
         'updated_at': ad['updated_at'].isoformat() if ad.get('updated_at') else None,
@@ -42,26 +49,33 @@ class AdvertisementListView(APIView):
         # Get query parameters
         search = request.query_params.get('search')
         media_type = request.query_params.get('media_type')
+        advertiser_id = request.query_params.get('advertiser_id')
         
-        # Build query with filters
+        # Build query with JOIN to get advertiser details (3NF)
         sql = """
-            SELECT ad_id, title, content_url, media_type, duration_sec,
-                   advertiser_name, advertiser_contact, metadata,
-                   created_at, updated_at
-            FROM advertisements
+            SELECT 
+                a.ad_id, a.title, a.content_url, a.media_type, a.duration_sec,
+                a.advertiser_id, a.metadata, a.created_at, a.updated_at,
+                adv.advertiser_name, adv.contact_phone, adv.contact_email
+            FROM advertisements a
+            JOIN advertisers adv ON a.advertiser_id = adv.advertiser_id
             WHERE 1=1
         """
         params = []
         
         if search:
-            sql += " AND (title LIKE %s OR advertiser_name LIKE %s)"
+            sql += " AND (a.title LIKE %s OR adv.advertiser_name LIKE %s)"
             params.extend([f'%{search}%', f'%{search}%'])
         
         if media_type and media_type in ['image', 'youtube']:
-            sql += " AND media_type = %s"
+            sql += " AND a.media_type = %s"
             params.append(media_type)
         
-        sql += " ORDER BY ad_id DESC"
+        if advertiser_id:
+            sql += " AND a.advertiser_id = %s"
+            params.append(advertiser_id)
+        
+        sql += " ORDER BY a.ad_id DESC"
         
         ads = execute_query(sql, params)
         
@@ -91,37 +105,48 @@ class AdvertisementListView(APIView):
         elif not isinstance(duration_seconds, int) or duration_seconds < 1:
             errors['duration_seconds'] = ['Duration must be a positive integer.']
         
-        advertiser_name = request.data.get('advertiser_name')
-        if not advertiser_name:
-            errors['advertiser_name'] = ['Advertiser name is required.']
+        # 3NF Change: Use advertiser_id instead of advertiser_name
+        advertiser_id = request.data.get('advertiser_id')
+        if not advertiser_id:
+            errors['advertiser_id'] = ['Advertiser ID is required.']
+        else:
+            # Verify advertiser exists
+            advertiser = execute_query_one(
+                "SELECT advertiser_id FROM advertisers WHERE advertiser_id = %s",
+                [advertiser_id]
+            )
+            if not advertiser:
+                errors['advertiser_id'] = ['Advertiser with this ID does not exist.']
         
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         
         # Get optional fields
-        advertiser_contact = request.data.get('advertiser_contact')
         metadata = request.data.get('metadata')
         
         # Convert metadata to JSON string if provided
         metadata_json = json.dumps(metadata) if metadata else None
         
-        # Insert the advertisement
+        # Insert the advertisement (3NF schema)
         ad_id = execute_insert(
             """
             INSERT INTO advertisements 
-            (title, content_url, media_type, duration_sec, advertiser_name, advertiser_contact, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (title, content_url, media_type, duration_sec, advertiser_id, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            [title, content_url, media_type, duration_seconds, advertiser_name, advertiser_contact, metadata_json]
+            [title, content_url, media_type, duration_seconds, advertiser_id, metadata_json]
         )
         
-        # Fetch the created advertisement
+        # Fetch the created advertisement with advertiser details
         ad = execute_query_one(
             """
-            SELECT ad_id, title, content_url, media_type, duration_sec,
-                   advertiser_name, advertiser_contact, metadata,
-                   created_at, updated_at
-            FROM advertisements WHERE ad_id = %s
+            SELECT 
+                a.ad_id, a.title, a.content_url, a.media_type, a.duration_sec,
+                a.advertiser_id, a.metadata, a.created_at, a.updated_at,
+                adv.advertiser_name, adv.contact_phone, adv.contact_email
+            FROM advertisements a
+            JOIN advertisers adv ON a.advertiser_id = adv.advertiser_id
+            WHERE a.ad_id = %s
             """,
             [ad_id]
         )
@@ -139,10 +164,13 @@ class AdvertisementDetailView(APIView):
     def get(self, request, ad_id):
         ad = execute_query_one(
             """
-            SELECT ad_id, title, content_url, media_type, duration_sec,
-                   advertiser_name, advertiser_contact, metadata,
-                   created_at, updated_at
-            FROM advertisements WHERE ad_id = %s
+            SELECT 
+                a.ad_id, a.title, a.content_url, a.media_type, a.duration_sec,
+                a.advertiser_id, a.metadata, a.created_at, a.updated_at,
+                adv.advertiser_name, adv.contact_phone, adv.contact_email
+            FROM advertisements a
+            JOIN advertisers adv ON a.advertiser_id = adv.advertiser_id
+            WHERE a.ad_id = %s
             """,
             [ad_id]
         )
@@ -200,13 +228,19 @@ class AdvertisementDetailView(APIView):
                 updates.append("duration_sec = %s")
                 params.append(duration)
         
-        if 'advertiser_name' in request.data:
-            updates.append("advertiser_name = %s")
-            params.append(request.data['advertiser_name'])
-        
-        if 'advertiser_contact' in request.data:
-            updates.append("advertiser_contact = %s")
-            params.append(request.data['advertiser_contact'])
+        # 3NF Change: Use advertiser_id instead of advertiser_name/contact
+        if 'advertiser_id' in request.data:
+            advertiser_id = request.data['advertiser_id']
+            # Verify advertiser exists
+            advertiser = execute_query_one(
+                "SELECT advertiser_id FROM advertisers WHERE advertiser_id = %s",
+                [advertiser_id]
+            )
+            if not advertiser:
+                errors['advertiser_id'] = ['Advertiser with this ID does not exist.']
+            else:
+                updates.append("advertiser_id = %s")
+                params.append(advertiser_id)
         
         if 'metadata' in request.data:
             metadata = request.data['metadata']

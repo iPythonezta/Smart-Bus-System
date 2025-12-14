@@ -27,7 +27,7 @@ def format_schedule_response(schedule, ad=None):
     if ad:
         response['ad'] = format_ad_response(ad)
     elif schedule.get('ad_title'):
-        # Ad data from JOIN
+        # Ad data from JOIN (3NF schema with nested advertiser)
         metadata = schedule.get('ad_metadata')
         if isinstance(metadata, str):
             try:
@@ -41,8 +41,12 @@ def format_schedule_response(schedule, ad=None):
             'content_url': schedule['ad_content_url'],
             'media_type': schedule['ad_media_type'],
             'duration_seconds': schedule['ad_duration_sec'],
-            'advertiser_name': schedule['ad_advertiser_name'],
-            'advertiser_contact': schedule.get('ad_advertiser_contact'),
+            'advertiser': {
+                'id': schedule.get('advertiser_id'),
+                'name': schedule.get('advertiser_name'),
+                'contact_phone': schedule.get('advertiser_phone'),
+                'contact_email': schedule.get('advertiser_email'),
+            },
             'metadata': metadata,
             'created_at': schedule['ad_created_at'].isoformat() if schedule.get('ad_created_at') else None,
             'updated_at': schedule['ad_updated_at'].isoformat() if schedule.get('ad_updated_at') else None,
@@ -63,7 +67,7 @@ class AdScheduleListView(APIView):
         display_id = request.query_params.get('display_id')
         active = request.query_params.get('active')
         
-        # Build query with filters
+        # Build query with filters (3NF schema - JOIN with advertisers table)
         sql = """
             SELECT 
                 s.schedule_id, s.ad_id, s.display_id, s.priority,
@@ -73,13 +77,16 @@ class AdScheduleListView(APIView):
                 a.content_url as ad_content_url,
                 a.media_type as ad_media_type,
                 a.duration_sec as ad_duration_sec,
-                a.advertiser_name as ad_advertiser_name,
-                a.advertiser_contact as ad_advertiser_contact,
                 a.metadata as ad_metadata,
                 a.created_at as ad_created_at,
-                a.updated_at as ad_updated_at
+                a.updated_at as ad_updated_at,
+                adv.advertiser_id,
+                adv.advertiser_name,
+                adv.contact_phone as advertiser_phone,
+                adv.contact_email as advertiser_email
             FROM ad_schedule s
             JOIN advertisements a ON s.ad_id = a.ad_id
+            JOIN advertisers adv ON a.advertiser_id = adv.advertiser_id
             JOIN display_units d ON s.display_id = d.display_id
             WHERE 1=1
         """
@@ -167,7 +174,7 @@ class AdScheduleListView(APIView):
                 [ad_id, did, start_time_parsed, end_time_parsed, priority]
             )
             
-            # Fetch the created schedule with related data
+            # Fetch the created schedule with related data (3NF schema)
             schedule = execute_query_one(
                 """
                 SELECT 
@@ -178,13 +185,16 @@ class AdScheduleListView(APIView):
                     a.content_url as ad_content_url,
                     a.media_type as ad_media_type,
                     a.duration_sec as ad_duration_sec,
-                    a.advertiser_name as ad_advertiser_name,
-                    a.advertiser_contact as ad_advertiser_contact,
                     a.metadata as ad_metadata,
                     a.created_at as ad_created_at,
-                    a.updated_at as ad_updated_at
+                    a.updated_at as ad_updated_at,
+                    adv.advertiser_id,
+                    adv.advertiser_name,
+                    adv.contact_phone as advertiser_phone,
+                    adv.contact_email as advertiser_email
                 FROM ad_schedule s
                 JOIN advertisements a ON s.ad_id = a.ad_id
+                JOIN advertisers adv ON a.advertiser_id = adv.advertiser_id
                 JOIN display_units d ON s.display_id = d.display_id
                 WHERE s.schedule_id = %s
                 """,
@@ -214,13 +224,16 @@ class AdScheduleDetailView(APIView):
                 a.content_url as ad_content_url,
                 a.media_type as ad_media_type,
                 a.duration_sec as ad_duration_sec,
-                a.advertiser_name as ad_advertiser_name,
-                a.advertiser_contact as ad_advertiser_contact,
                 a.metadata as ad_metadata,
                 a.created_at as ad_created_at,
-                a.updated_at as ad_updated_at
+                a.updated_at as ad_updated_at,
+                adv.advertiser_id,
+                adv.advertiser_name,
+                adv.contact_phone as advertiser_phone,
+                adv.contact_email as advertiser_email
             FROM ad_schedule s
             JOIN advertisements a ON s.ad_id = a.ad_id
+            JOIN advertisers adv ON a.advertiser_id = adv.advertiser_id
             JOIN display_units d ON s.display_id = d.display_id
             WHERE s.schedule_id = %s
             """,

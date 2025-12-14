@@ -80,7 +80,7 @@ WSGI_APPLICATION = 'smartbus.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'busdb',       
+        'NAME': 'smart_bus',       
         'USER': 'root',
         'PASSWORD': 'admin',
         'HOST': 'localhost',
